@@ -1,10 +1,7 @@
 #include <LiquidCrystal.h>
 #include <OneWire.h>
-#include <DallasTemperature.h>
 #include <stdlib.h>	// for ltoa() call
-
-// Data wire is plugged into port 2 on the Arduino
-#define ONE_WIRE_BUS 2
+#include <math.h> // to do round call
 
 /***********************/
 /* Interval Definitions*/
@@ -15,7 +12,7 @@
 /*Define array size to be used for averaging. */
 /*In The array, the max value and min value are taken out and the rest averaged*/
 /* If 2 or less, it is just averaged*/
-#define ARRAY_SIZE 10
+#define ARRAY_SIZE 6
 
 /**********************/
 /*Hysterisis Intervals*/
@@ -28,10 +25,11 @@
 #define RELAY1  3      // Relay to start the first heater
 #define BACKLIGHT 10
 
-// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
-OneWire oneWire(ONE_WIRE_BUS);
-// Pass our oneWire reference to Dallas Temperature. 
-DallasTemperature sensors(&oneWire);
+
+int DS18S20_Pin = 2; //DS18S20 Signal pin on digital 2
+
+//Temperature chip i/o
+OneWire ds(DS18S20_Pin);  // on digital pin 2
 
 /*****************************/
 /*set Triggers *************/
@@ -97,6 +95,9 @@ void setup()
 
 
   Serial.begin(115200);
+	
+	//wait for thermometer to start	
+	
   
 }
 
@@ -116,10 +117,12 @@ void loop() {
     for (i=0; i < ARRAY_SIZE -1 ; i++) {  
       therm1[i] = therm1[i+1];
     }
-
-    sensors.requestTemperatures(); // Send the command to get temperatures
     
-    therm1[ARRAY_SIZE -1] = sensors.getTempCByIndex(0); 
+		//Temp is in float form, convert to into then put in array
+		float_temp = (long) getTemp(); //change to long as I think this is the corect input
+		#float_temp = (int) round(float_temp); //not needed if the things are floats.
+		
+    therm1[ARRAY_SIZE -1] =  float_temp;
     
     temp1 = mov_avg(therm1);  
     
@@ -236,6 +239,55 @@ if (millis() - last_check > INTERVAL)
   lcd.print(buf);  
 
 }
+
+
+//For reading dallas one wire:
+float getTemp(){
+ //returns the temperature from one DS18S20 in DEG Celsius
+ byte data[12];
+ byte addr[8];
+
+ if ( !ds.search(addr)) {
+   //no more sensors on chain, reset search
+   ds.reset_search();
+   return -1000;
+ }
+
+ if ( OneWire::crc8( addr, 7) != addr[7]) {
+   Serial.println("CRC is not valid!");
+   return -1000;
+ }
+
+ if ( addr[0] != 0x10 && addr[0] != 0x28) {
+   Serial.print("Device is not recognized");
+   return -1000;
+ }
+
+ ds.reset();
+ ds.select(addr);
+ ds.write(0x44,1); // start conversion, with parasite power on at the end
+
+ byte present = ds.reset();
+ ds.select(addr);  
+ ds.write(0xBE); // Read Scratchpad
+
+
+ for (int i = 0; i < 9; i++) { // we need 9 bytes
+  data[i] = ds.read();
+ }
+ 
+ ds.reset_search();
+ 
+ byte MSB = data[1];
+ byte LSB = data[0];
+
+ float tempRead = ((MSB << 8) | LSB); //using two's compliment
+ float TemperatureSum = tempRead / 16;
+ 
+ return TemperatureSum;
+ 
+}
+
 
 
 long mov_avg(long averages[ARRAY_SIZE])
